@@ -1,11 +1,11 @@
-use image::{Rgb, Rgba, Pixel, RgbImage};
-use std::vec::Vec;
-use std::fmt::{Display, Formatter, Result};
-use std::rc::Rc;
+use image::{Rgb, Pixel, RgbImage};
 use rand;
+use std::fmt::{Display, Formatter, Result};
+use std::time::Instant;
+use std::vec::Vec;
 
-static WIDTH: u16 = 16001;
-static HEIGHT: u16 = 16001;
+static WIDTH: u16 = 22001;
+static HEIGHT: u16 = 22001;
 
 struct Grid {
     positions: Vec<Vec<Position>>,
@@ -28,16 +28,16 @@ impl Grid {
         }
     }
 
-    pub fn generate_initial(width: u16, height: u16, path_color: Rgb<u8>, back_color: Rgb<u8>) -> Vec<Vec<Position>> {
+    fn generate_initial(width: u16, height: u16, path_color: Rgb<u8>, back_color: Rgb<u8>) -> Vec<Vec<Position>> {
         let mut overall: Vec<Vec<Position>> = Vec::new();
         for row in 0..width {
             let mut curr: Vec<Position> = Vec::new();
             for col in 0..height {
-                let mut p: Position = Position::init(row, col);
+                let mut p: Position = Position::init(row, col, back_color);
                 if row == 0 && col == 1 || row == 1 && col == 1 || row == width-1 && col == height-2 {
-                    p.set_color(back_color.clone());
-                } else {
                     p.set_color(path_color.clone());
+                } else {
+                    p.set_color(back_color.clone());
                 }
                 curr.push(p);
             }
@@ -63,25 +63,19 @@ struct Position {
     row: u16,
     col: u16,
     tile_color: Rgb<u8>,
-    neighbors: Vec<(u16, u16)>, // Use the coordinates+visited instead of object 
-    walls: Vec<(u16, u16)>, // Use the coordinates+visited instead of object
+    neighbors: Vec<(u16, u16)>, // Use the coordinates instead of object 
     visited: bool
 }
 
 impl Position {
 
-    pub fn init(row: u16, col: u16) -> Self {
-        let tile_color = Rgb::from([0,0,0]);
-        let neighbors = Vec::new();
-        let walls = Vec::new();
-        let visited = false;
+    pub fn init(row: u16, col: u16, default_color: Rgb<u8>) -> Self {
         Position {
             row, 
             col,
-            tile_color,
-            neighbors,
-            walls,
-            visited
+            tile_color: default_color,
+            neighbors: Vec::new(),
+            visited: false
         }
     }
 
@@ -99,22 +93,6 @@ impl Position {
             self.neighbors.push((self.row, self.col - 2));
         }
     }
-
-    pub fn find_walls(&mut self) {
-        if self.row.checked_sub(1).is_some() {
-            self.walls.push((self.row - 1, self.col));
-        }
-        if (self.col + 1) <= (WIDTH-1) {
-            self.walls.push((self.row, self.col + 1));
-        }
-        if (self.row + 1) <= (HEIGHT-1) {
-            self.walls.push((self.row + 1, self.col));
-        }
-        if self.col.checked_sub(1).is_some() {
-            self.walls.push((self.row, self.col - 1));
-        }
-    }
-
 
     pub fn set_color(&mut self, color: Rgb<u8>) {
         self.tile_color = color;
@@ -152,8 +130,8 @@ impl Position {
 
 impl Display for Position {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        write!(f, "Position: \nrow: {}, col: {}, has visited: {}, tile color: {:?}\nneighbors: {:?}\nwalls: {:?}\n",
-               self.row, self.col, self.visited, self.tile_color, self.neighbors, self.walls)
+        write!(f, "Position: \nrow: {}, col: {}, has visited: {}, tile color: {:?}\nneighbors: {:?}\n",
+               self.row, self.col, self.visited, self.tile_color, self.neighbors)
     }
 }
 
@@ -170,20 +148,26 @@ fn wall_pos(current_pos: (u16, u16), neighbor_pos: (u16, u16)) -> Option<(u16, u
 }
 
 fn main() {
-    let back_rgb: &Rgb<u8> = Pixel::from_slice(&[0; 3]);
-    let path_rbg: &Rgb<u8> = Pixel::from_slice(&[255; 3]);
-    let mut grid: Grid = Grid::init(WIDTH, HEIGHT, path_rbg.to_rgb(), back_rgb.to_rgb());
+    let total = Instant::now();
+    let back_rgb: &Rgb<u8> = Pixel::from_slice(&[255; 3]);
+    let path_rgb: &Rgb<u8> = Pixel::from_slice(&[0; 3]);
+
+    let mut start = Instant::now();
+    let mut grid: Grid = Grid::init(WIDTH, HEIGHT, path_rgb.to_rgb(), back_rgb.to_rgb());
+    println!("Took {:?} to generate the grid", start.elapsed());
 
     //Find neighbors
+    start = Instant::now();
     for row in grid.positions.iter_mut() {
         for val in row.iter_mut() {
             val.find_neighbors();
-            val.find_walls();
             //print!("{}\n", val);
         }
         //println!();
     }
+    println!("Took {:?} to find neighbors", start.elapsed());
 
+    start = Instant::now();
     let mut backtrack: Vec<(u16,u16)> = Vec::new();
     let mut current: (u16, u16) = (1,1);
     backtrack.push(current);
@@ -203,12 +187,12 @@ fn main() {
                     //println!("Found neighbor at {:?}", pos);
 
                     neighbor.visited = true;
-                    neighbor.tile_color = back_rgb.clone();
+                    neighbor.tile_color = path_rgb.clone();
                 }
                 backtrack.push(pos);
                 let wall_pos = wall_pos(current, pos).unwrap();
                 let wall: &mut Position = grid.positions.get_mut(wall_pos.0 as usize).unwrap().get_mut(wall_pos.1 as usize).unwrap();
-                wall.tile_color = back_rgb.clone();
+                wall.tile_color = path_rgb.clone();
                 current = pos;
             },
             None => {
@@ -218,10 +202,14 @@ fn main() {
         }
         //println!("Backtrack has {} elements", backtrack.len());
     }
+    println!("Took {:?} to run backtracking alg.", start.elapsed());
 
     println!("Took {} iterations to run algorithm", iter_num);
 
+    start = Instant::now();
     grid.save_image();
+    println!("Took {:?} to save image", start.elapsed());
+    println!("Total time taken {:?}", total.elapsed());
 }
 
 
